@@ -94,6 +94,7 @@ declare global {
       getExistingKeys: (candidates: DuplicateCandidate[]) => Promise<string[]>
       importTransactions: (rows: TransactionInput[]) => Promise<{ imported: number; duplicates: number }>
       clearAllData: () => Promise<boolean>
+      onOpenImport: (cb: () => void) => void
     }
   }
 }

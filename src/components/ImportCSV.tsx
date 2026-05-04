@@ -27,7 +27,9 @@ export default function ImportCSV({ onImported }: ImportCSVProps) {
 
     try {
       const text = await file.text()
-      const detected = detectCsvBank(text) ?? forcedBankId ?? null
+      // forcedBankId from the drop zone takes priority over auto-detection.
+      // Auto-detection is only a fallback (e.g. future drag-anywhere support).
+      const detected = forcedBankId ?? detectCsvBank(text) ?? null
       if (detected === null) {
         setError('Could not detect CSV format. Use a TD, BMO, or TD Chequing CSV export.')
         setRows([])
@@ -94,12 +96,16 @@ export default function ImportCSV({ onImported }: ImportCSVProps) {
     }
 
     setLoading(true)
-    const result = await importTransactions(toImport)
-    setLoading(false)
-
-    setSummary(`${result.imported} imported, ${result.duplicates + duplicateCount} duplicates skipped`)
-    setRows([])
-    onImported()
+    try {
+      const result = await importTransactions(toImport)
+      setSummary(`${result.imported} imported, ${result.duplicates + duplicateCount} duplicates skipped`)
+      setRows([])
+      onImported()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (

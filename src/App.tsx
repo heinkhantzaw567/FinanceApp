@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import BankCards from './components/BankCards'
 import Dashboard from './components/Dashboard'
 import ImportCSV from './components/ImportCSV'
@@ -22,6 +22,10 @@ function App() {
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
   const [month, setMonth] = useState(currentMonth())
   const [refreshToken, setRefreshToken] = useState(0)
+
+  useEffect(() => {
+    window.cashflow.onOpenImport(() => setActiveView('import'))
+  }, [])
 
   const content = useMemo(() => {
     switch (activeView) {

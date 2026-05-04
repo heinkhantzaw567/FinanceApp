@@ -8,6 +8,11 @@ const path_1 = __importDefault(require("path"));
 const crypto_1 = require("crypto");
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 let db;
+let mainWindow = null;
+let tray = null;
+let isQuitting = false;
+// Teal 16×16 circle, generated offline and embedded to avoid file-path issues in dev vs packaged
+const TRAY_ICON_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAALklEQVR42mNgoBD4nT2ChkhQik8bftVY9JCmgRjVKHpGpAbaxwM5SYOcxEckAACz0zLsABMuwgAAAABJRU5ErkJggg==';
 function normalizeAmount(value) {
     return Math.round(Math.abs(value) * 100) / 100;
 }
@@ -69,19 +74,120 @@ function ensureDb() {
       credit_limit REAL DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
     CREATE INDEX IF NOT EXISTS idx_transactions_bank ON transactions(bank_id);
     CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
     CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category);
   `);
+    // --- Migrations (must run BEFORE any INSERT that references new columns) ---
+    // 1. Add account_type to banks if missing (old schema had no such column)
+    const bankCols = db.pragma('table_info(banks)').map((c) => c.name);
+    if (!bankCols.includes('account_type')) {
+        db.exec(`ALTER TABLE banks ADD COLUMN account_type TEXT NOT NULL DEFAULT 'credit'`);
+        db.prepare(`UPDATE banks SET account_type = 'chequing' WHERE id = 2`).run();
+    }
+    // 2. Widen bank_id CHECK constraint from (0,1) → (0,1,2) if needed.
+    //    SQLite can't ALTER constraints, so recreate the table.
+    const txCreate = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'`).get()?.sql ?? '';
+    if (txCreate.includes('(0, 1)') && !txCreate.includes('(0, 1, 2)')) {
+        db.exec(`
+      ALTER TABLE transactions RENAME TO transactions_old;
+      CREATE TABLE transactions (
+        id TEXT PRIMARY KEY,
+        date TEXT NOT NULL,
+        description TEXT NOT NULL,
+        amount REAL NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('charge', 'refund')),
+        bank_id INTEGER NOT NULL CHECK(bank_id IN (0, 1, 2)),
+        category TEXT NOT NULL,
+        source TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO transactions SELECT * FROM transactions_old;
+      DROP TABLE transactions_old;
+      CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
+      CREATE INDEX IF NOT EXISTS idx_transactions_bank ON transactions(bank_id);
+      CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
+      CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category);
+    `);
+    }
+    // --- Seed bank rows (after migrations so account_type column is guaranteed present) ---
     db.prepare(`INSERT OR IGNORE INTO banks (id, name, account_type, opening_balance, credit_limit) VALUES
       (0, 'TD Credit Card', 'credit', 0, 0),
       (1, 'BMO Credit Card', 'credit', 0, 0),
       (2, 'TD Chequing', 'chequing', 0, 0)`).run();
 }
+function checkAndNotify() {
+    if (!mainWindow)
+        return;
+    const current = monthId(new Date());
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('last_notified_month');
+    const lastNotified = row?.value ?? '';
+    if (current === lastNotified)
+        return;
+    const { start, end } = monthBounds(current);
+    const { count } = db
+        .prepare('SELECT COUNT(*) AS count FROM transactions WHERE date BETWEEN ? AND ?')
+        .get(start, end);
+    // Record that we've checked this month regardless of whether we notify
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('last_notified_month', current);
+    // Already imported data this month — no notification needed
+    if (count > 0)
+        return;
+    if (!electron_1.Notification.isSupported())
+        return;
+    const [yearStr, monthStr] = current.split('-');
+    const monthLabel = new Date(Number(yearStr), Number(monthStr) - 1, 1).toLocaleString('en-US', {
+        month: 'long',
+        year: 'numeric',
+    });
+    const notification = new electron_1.Notification({
+        title: 'Cashflow Tracker',
+        body: `It's ${monthLabel} — time to download your TD and BMO statements.`,
+    });
+    notification.on('click', () => {
+        if (mainWindow) {
+            mainWindow.show();
+            mainWindow.focus();
+            mainWindow.webContents.send('open-import');
+        }
+    });
+    notification.show();
+}
+function setupTray() {
+    const icon = electron_1.nativeImage.createFromDataURL(TRAY_ICON_DATA_URL);
+    tray = new electron_1.Tray(icon);
+    tray.setToolTip('Cashflow Tracker');
+    const menu = electron_1.Menu.buildFromTemplate([
+        {
+            label: 'Open',
+            click: () => {
+                mainWindow?.show();
+                mainWindow?.focus();
+            },
+        },
+        { type: 'separator' },
+        {
+            label: 'Quit',
+            click: () => {
+                electron_1.app.quit();
+            },
+        },
+    ]);
+    tray.setContextMenu(menu);
+    tray.on('double-click', () => {
+        mainWindow?.show();
+        mainWindow?.focus();
+    });
+}
 function createWindow() {
     const isDev = !electron_1.app.isPackaged;
-    const mainWindow = new electron_1.BrowserWindow({
+    mainWindow = new electron_1.BrowserWindow({
         width: 1280,
         height: 840,
         minWidth: 1200,
@@ -93,11 +199,22 @@ function createWindow() {
             nodeIntegration: false,
         },
     });
+    // Hide to tray instead of closing
+    mainWindow.on('close', (event) => {
+        if (!isQuitting) {
+            event.preventDefault();
+            mainWindow?.hide();
+        }
+    });
     if (isDev) {
-        mainWindow.loadURL('http://localhost:5173');
+        mainWindow.loadURL('http://localhost:5173').catch((err) => {
+            console.error('[main] loadURL failed:', err);
+        });
     }
     else {
-        mainWindow.loadFile(path_1.default.join(__dirname, '../dist/index.html'));
+        mainWindow.loadFile(path_1.default.join(__dirname, '../dist/index.html')).catch((err) => {
+            console.error('[main] loadFile failed:', err);
+        });
     }
 }
 function registerIpcHandlers() {
@@ -272,15 +389,20 @@ function registerIpcHandlers() {
         return true;
     });
     electron_1.ipcMain.handle('cashflow:get-existing-keys', (_event, candidates) => {
-        const check = db.prepare('SELECT id FROM transactions WHERE date = ? AND description = ? AND amount = ? AND bank_id = ? LIMIT 1');
-        const matches = [];
-        for (const item of candidates) {
-            const found = check.get(item.date, item.description, normalizeAmount(item.amount), item.bankId);
-            if (found) {
-                matches.push(item.key);
-            }
-        }
-        return matches;
+        if (candidates.length === 0)
+            return [];
+        // Single query — fetch all existing fingerprints and match in JS.
+        // Avoids N round-trips to SQLite for large CSV files.
+        const existing = db
+            .prepare('SELECT date, description, amount, bank_id FROM transactions')
+            .all();
+        const existingSet = new Set(existing.map((r) => `${r.date}|${r.description.trim().toUpperCase()}|${r.amount.toFixed(2)}|${r.bank_id}`));
+        return candidates
+            .filter((c) => {
+            const k = `${c.date}|${c.description.trim().toUpperCase()}|${normalizeAmount(c.amount).toFixed(2)}|${c.bankId}`;
+            return existingSet.has(k);
+        })
+            .map((c) => c.key);
     });
     electron_1.ipcMain.handle('cashflow:import-transactions', (_event, payload) => {
         const check = db.prepare('SELECT id FROM transactions WHERE date = ? AND description = ? AND amount = ? AND bank_id = ? LIMIT 1');
@@ -314,11 +436,18 @@ electron_1.app.whenReady().then(() => {
     ensureDb();
     registerIpcHandlers();
     createWindow();
+    setupTray();
+    checkAndNotify();
+    // Re-check on month rollover if app stays open overnight
+    setInterval(() => checkAndNotify(), 4 * 60 * 60 * 1000);
     electron_1.app.on('activate', () => {
         if (electron_1.BrowserWindow.getAllWindows().length === 0) {
             createWindow();
         }
     });
+}).catch((err) => {
+    console.error('[main] startup error:', err);
+    electron_1.app.exit(1);
 });
 electron_1.app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
@@ -326,6 +455,7 @@ electron_1.app.on('window-all-closed', () => {
     }
 });
 electron_1.app.on('before-quit', () => {
+    isQuitting = true;
     if (db) {
         db.close();
     }

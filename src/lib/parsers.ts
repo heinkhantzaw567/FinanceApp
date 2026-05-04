@@ -37,20 +37,24 @@ function parseRows(csvText: string): string[][] {
 }
 
 export function detectCsvBank(csvText: string): BankId | null {
-  const firstLine = csvText.split(/\r?\n/).find((line) => line.trim()) ?? ''
-  const upper = firstLine.toUpperCase()
+  // Look at first few lines — BMO has a preamble before the real header
+  const lines = csvText.split(/\r?\n/).filter((l) => l.trim())
+  const firstLine = lines[0] ?? ''
+  const allText = lines.slice(0, 4).join(' ').toUpperCase()
 
-  // TD Chequing: quoted YYYY-MM-DD date (must check before header keywords)
+  // TD Chequing: quoted YYYY-MM-DD date at start of first data line
   if (/^"?\d{4}-\d{2}-\d{2}"?/.test(firstLine.trim())) {
     return 2
   }
 
-  // Header-based detection
-  if (upper.includes('DEBIT') || upper.includes('CREDIT')) {
-    return 0
-  }
-  if (upper.includes('ITEM#') || upper.includes('AMOUNT')) {
+  // BMO: has "Item #" column (may appear after a preamble line)
+  if (allText.includes('ITEM #') || allText.includes('ITEM#')) {
     return 1
+  }
+
+  // TD Credit with header
+  if (allText.includes('DEBIT') || allText.includes('CREDIT')) {
+    return 0
   }
 
   // Headerless TD credit card: starts with MM/DD/YYYY date
@@ -109,24 +113,47 @@ export function parseBmoCsv(csvText: string): ParsedImportRow[] {
   const rows = parseRows(csvText)
   const parsed: ParsedImportRow[] = []
 
+  // Actual BMO format (6 columns):
+  // Item #, Card #, Transaction Date (YYYYMMDD), Posting Date, Transaction Amount, Description
+  // File also has a preamble line before the header row.
+
   for (const row of rows) {
+    // Need at least 6 columns for the new format, or 3 for legacy
     if (row.length < 3) {
       continue
     }
 
-    const headerLike = row.some((cell) => /item#|date|description|amount/i.test(cell))
-    if (headerLike) {
+    // Skip header and preamble rows
+    const rowText = row.join(' ').toUpperCase()
+    if (
+      rowText.includes('ITEM #') ||
+      rowText.includes('ITEM#') ||
+      rowText.includes('TRANSACTION DATE') ||
+      rowText.includes('FOLLOWING DATA')
+    ) {
       continue
     }
 
-    const hasItemCol = row.length >= 4
-    const dateRaw = hasItemCol ? row[1] : row[0]
-    const descriptionRaw = hasItemCol ? row[2] : row[1]
-    const amountRaw = hasItemCol ? row[3] : row[2]
+    let date: string | null = null
+    let description = ''
+    let amount = Number.NaN
 
-    const date = normalizeDate(dateRaw ?? '')
-    const description = normalizeDescription(descriptionRaw)
-    const amount = parseNumber(amountRaw)
+    if (row.length >= 6) {
+      // New format: Item#, Card#, TxDate, PostDate, Amount, Description
+      date = normalizeDate(row[2] ?? '')
+      description = normalizeDescription(row[5])
+      amount = parseNumber(row[4])
+    } else if (row.length >= 4) {
+      // Legacy format: Item#, Date, Description, Amount
+      date = normalizeDate(row[1] ?? '')
+      description = normalizeDescription(row[2])
+      amount = parseNumber(row[3])
+    } else {
+      // 3-column fallback: Date, Description, Amount
+      date = normalizeDate(row[0] ?? '')
+      description = normalizeDescription(row[1])
+      amount = parseNumber(row[2])
+    }
 
     if (!date || !description || !Number.isFinite(amount) || amount === 0) {
       continue
@@ -137,10 +164,17 @@ export function parseBmoCsv(csvText: string): ParsedImportRow[] {
       continue
     }
 
-    const keywordType = classifyByKeyword(description)
-    const type = keywordType === 'refund' ? 'refund' : amount > 0 ? 'refund' : 'charge'
+    // Skip BMO transfer payments: "TRSF FROM/DE ACCT/CPT ..."
+    if (/^TRSF (FROM|DE)\b/i.test(description)) {
+      continue
+    }
 
-    parsed.push(buildRow(date, description, amount, 1, type))
+    // In BMO exports: positive = charge (you spent), negative = credit/refund
+    const keywordType = classifyByKeyword(description)
+    const type: 'charge' | 'refund' =
+      keywordType === 'refund' ? 'refund' : amount < 0 ? 'refund' : 'charge'
+
+    parsed.push(buildRow(date, description, Math.abs(amount), 1, type))
   }
 
   return parsed
@@ -151,40 +185,74 @@ export function parseTdChequingCsv(csvText: string): ParsedImportRow[] {
   const parsed: ParsedImportRow[] = []
 
   for (const row of rows) {
-    // Columns: date, description, debit, credit, balance
+    // Columns: date, description, withdrawal, deposit, balance
     if (row.length < 4) {
       continue
     }
 
     const date = normalizeDate(row[0] ?? '')
     const description = normalizeDescription(row[1])
-    const credit = parseNumber(row[3]) // col 3 = money in
-
-    if (!date || !description || !Number.isFinite(credit) || credit <= 0) {
+    if (!date || !description) {
       continue
     }
 
-    // Classify chequing income by description
-    let category = 'Income'
+    const withdrawal = parseNumber(row[2]) // col 2 = money out
+    const deposit = parseNumber(row[3])    // col 3 = money in
+    const withdrawalValid = Number.isFinite(withdrawal) && withdrawal > 0
+    const depositValid = Number.isFinite(deposit) && deposit > 0
     const upper = description.toUpperCase()
-    if (upper.includes('PAY') && !upper.includes('PAYPAL')) {
-      category = 'Paycheck'
-    } else if (upper.includes('E-TRANSFER') || upper.includes('E-TFR')) {
-      category = 'E-Transfer'
-    } else if (upper.includes('PAYPAL') || upper.includes('STRIPE')) {
-      category = 'Income'
-    }
 
-    const row2: ParsedImportRow = {
-      date,
-      description,
-      amount: Math.round(credit * 100) / 100,
-      type: 'refund',
-      bankId: 2,
-      category,
-      key: duplicateKey({ date, description, amount: Math.round(credit * 100) / 100, bankId: 2 }),
+    if (depositValid) {
+      let category = 'Income'
+      if (upper.includes('PAY') && !upper.includes('PAYPAL')) {
+        category = 'Paycheck'
+      } else if (upper.includes('E-TRANSFER') || upper.includes('E-TFR')) {
+        category = 'E-Transfer'
+      }
+      const amount = Math.round(deposit * 100) / 100
+      parsed.push({
+        date,
+        description,
+        amount,
+        type: 'refund',
+        bankId: 2,
+        category,
+        key: duplicateKey({ date, description, amount, bankId: 2 }),
+      })
+    } else if (withdrawalValid) {
+      let category = 'Other'
+      if (upper.includes('RENT') || upper.includes('LEASE')) {
+        category = 'Rent'
+      } else if (upper.includes('E-TRANSFER') || upper.includes('E-TFR')) {
+        category = 'E-Transfer'
+      } else if (
+        upper.includes('TD VISA') ||
+        upper.includes('BMO') ||
+        upper.includes('CREDIT CARD') ||
+        upper.includes('CREDITCARD')
+      ) {
+        category = 'Credit Card Payment'
+      } else if (
+        upper.includes('GROCERY') ||
+        upper.includes('GROCERIES') ||
+        upper.includes('METRO') ||
+        upper.includes('LOBLAWS') ||
+        upper.includes('SOBEYS') ||
+        upper.includes('FOOD BASICS')
+      ) {
+        category = 'Groceries'
+      }
+      const amount = Math.round(withdrawal * 100) / 100
+      parsed.push({
+        date,
+        description,
+        amount,
+        type: 'charge',
+        bankId: 2,
+        category,
+        key: duplicateKey({ date, description, amount, bankId: 2 }),
+      })
     }
-    parsed.push(row2)
   }
 
   return parsed

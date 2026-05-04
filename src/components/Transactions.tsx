@@ -53,7 +53,7 @@ export default function Transactions({ refreshToken, onChanged }: TransactionsPr
     const data = rows.map((row) => ({
       Date: row.date,
       Description: row.description,
-      Bank: row.bank_id === 0 ? 'TD' : 'BMO',
+      Bank: row.bank_id === 0 ? 'TD Credit' : row.bank_id === 1 ? 'BMO Credit' : 'TD Chequing',
       Type: txTypeLabel(row.type),
       Category: row.category,
       Amount: row.amount,
@@ -152,7 +152,7 @@ export default function Transactions({ refreshToken, onChanged }: TransactionsPr
                 <tr key={row.id}>
                   <td className="py-3 pr-3 text-[#888888]">{row.date}</td>
                   <td className="py-3 pr-3 text-white">{row.description}</td>
-                  <td className="py-3 pr-3 text-[#888888]">{row.bank_id === 0 ? 'TD' : 'BMO'}</td>
+                  <td className="py-3 pr-3 text-[#888888]">{row.bank_id === 0 ? 'TD Credit' : row.bank_id === 1 ? 'BMO Credit' : 'TD Chequing'}</td>
                   <td className={`py-3 pr-3 font-medium ${row.type === 'charge' ? 'text-[#ef4444]' : 'text-[#22c55e]'}`}>
                     {txTypeLabel(row.type)}
                   </td>

@@ -23,6 +23,7 @@ export const CATEGORY_OPTIONS = [
   'Travel',
   'Credit Card Payment',
   'Cashback & Rewards',
+  'Rent',
   'Paycheck',
   'E-Transfer',
   'Income',

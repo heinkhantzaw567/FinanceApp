@@ -44,6 +44,7 @@ const api = {
     ipcRenderer.invoke('cashflow:get-existing-keys', candidates),
   importTransactions: (rows: TransactionInput[]) => ipcRenderer.invoke('cashflow:import-transactions', rows),
   clearAllData: () => ipcRenderer.invoke('cashflow:clear-all'),
+  onOpenImport: (cb: () => void) => ipcRenderer.on('open-import', () => cb()),
 }
 
 contextBridge.exposeInMainWorld('cashflow', api)
