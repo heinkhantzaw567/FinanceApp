@@ -4,6 +4,7 @@ export const BANK_OPTIONS: Array<{ id: BankId; label: string }> = [
   { id: 0, label: 'TD Credit Card' },
   { id: 1, label: 'BMO Credit Card' },
   { id: 2, label: 'TD Chequing' },
+  { id: 3, label: 'Other' },
 ]
 
 export const KEYWORDS = ['REFUND', 'CREDIT', 'REVERSAL', 'CASHBACK', 'REBATE']

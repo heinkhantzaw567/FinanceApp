@@ -1,12 +1,19 @@
 import { useMemo, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import { getExistingKeys, importTransactions } from '../lib/db'
-import { detectCsvBank, parseBmoCsv, parseTdChequingCsv, parseTdCsv } from '../lib/parsers'
-import type { BankId, ParsedImportRow, TransactionInput } from '../lib/types'
+import { autoDetectColMapping, detectCsvBank, parseBmoCsv, parseGenericCsv, parseTdChequingCsv, parseTdCsv, sniffCsvHeaders } from '../lib/parsers'
+import type { BankId, ColMapping, ParsedImportRow, TransactionInput } from '../lib/types'
 import { formatCurrency, prepareDuplicateCandidates, txTypeLabel } from '../lib/utils'
 
 interface ImportCSVProps {
   onImported: () => void
+}
+
+interface GenericSetup {
+  file: File
+  headers: string[]
+  preview: string[][]
+  mapping: ColMapping
 }
 
 export default function ImportCSV({ onImported }: ImportCSVProps) {
@@ -14,6 +21,7 @@ export default function ImportCSV({ onImported }: ImportCSVProps) {
   const [loading, setLoading] = useState(false)
   const [summary, setSummary] = useState<string>('')
   const [error, setError] = useState<string>('')
+  const [genericSetup, setGenericSetup] = useState<GenericSetup | null>(null)
 
   const duplicateCount = useMemo(
     () => rows.filter((row) => row.status === 'duplicate').length,
@@ -57,6 +65,52 @@ export default function ImportCSV({ onImported }: ImportCSVProps) {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to parse CSV file.')
       setRows([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function processGenericFile(file: File) {
+    setError('')
+    setSummary('')
+    setRows([])
+    try {
+      const text = await file.text()
+      const { headers, preview } = sniffCsvHeaders(text)
+      if (headers.length === 0) {
+        setError('Could not read CSV file.')
+        return
+      }
+      const mapping = autoDetectColMapping(headers)
+      setGenericSetup({ file, headers, preview, mapping })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to read file.')
+    }
+  }
+
+  async function parseWithMapping() {
+    if (!genericSetup) return
+    setLoading(true)
+    setError('')
+    setSummary('')
+    try {
+      const text = await genericSetup.file.text()
+      const parsed = parseGenericCsv(text, genericSetup.mapping, 3)
+      if (parsed.length === 0) {
+        setError('No valid rows found. Check your column mapping.')
+        setLoading(false)
+        return
+      }
+      const existingKeys = new Set(await getExistingKeys(prepareDuplicateCandidates(parsed)))
+      const withStatus = parsed.map((row) => ({
+        ...row,
+        status: existingKeys.has(row.key) ? 'duplicate' : 'new',
+      })) as ParsedImportRow[]
+      setRows(withStatus)
+      setSummary(`${withStatus.length} rows parsed.`)
+      setGenericSetup(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to parse CSV file.')
     } finally {
       setLoading(false)
     }
@@ -112,7 +166,7 @@ export default function ImportCSV({ onImported }: ImportCSVProps) {
     <div className="max-w-4xl space-y-6">
       <p className="text-xs font-semibold uppercase tracking-widest text-[#666666]">Import CSV</p>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <DropZone
           label="TD Credit Card"
           subtext="Date, Description, Debit, Credit"
@@ -131,7 +185,22 @@ export default function ImportCSV({ onImported }: ImportCSVProps) {
           onDrop={(event) => onDrop(event, 2)}
           onFileChange={(event) => handleInputChange(event, 2)}
         />
+        <DropZone
+          label="Other Bank"
+          subtext="Any CSV — map columns below"
+          onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) processGenericFile(f) }}
+          onFileChange={(e) => { const f = e.target.files?.[0]; if (f) processGenericFile(f) }}
+        />
       </div>
+
+      {genericSetup && (
+        <GenericMapper
+          setup={genericSetup}
+          onChange={setGenericSetup}
+          onParse={parseWithMapping}
+          loading={loading}
+        />
+      )}
 
       {loading && (
         <p className="rounded-lg border border-[#1f1f1f] bg-[#1a1a1a] p-3 text-sm text-[#888888]">
@@ -195,6 +264,135 @@ export default function ImportCSV({ onImported }: ImportCSVProps) {
         </section>
       )}
     </div>
+  )
+}
+
+function ColSelect({
+  label,
+  headers,
+  value,
+  onChange,
+}: {
+  label: string
+  headers: string[]
+  value: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs font-semibold uppercase tracking-widest text-[#666666]">{label}</label>
+      <select
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="rounded-lg border border-[#333333] bg-[#111111] px-3 py-2 text-sm text-white"
+      >
+        <option value={-1}>— none —</option>
+        {headers.map((h, i) => (
+          <option key={i} value={i}>{i}: {h || `(col ${i})`}</option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+function GenericMapper({
+  setup,
+  onChange,
+  onParse,
+  loading,
+}: {
+  setup: GenericSetup
+  onChange: (s: GenericSetup) => void
+  onParse: () => void
+  loading: boolean
+}) {
+  const { headers, preview, mapping } = setup
+
+  function update(patch: Partial<ColMapping>) {
+    onChange({ ...setup, mapping: { ...mapping, ...patch } })
+  }
+
+  return (
+    <section className="space-y-4 rounded-xl border border-[#1f1f1f] bg-[#1a1a1a] p-5">
+      <p className="text-xs font-semibold uppercase tracking-widest text-[#666666]">
+        Map columns — {setup.file.name}
+      </p>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <ColSelect label="Date" headers={headers} value={mapping.dateCol} onChange={(v) => update({ dateCol: v })} />
+        <ColSelect label="Description" headers={headers} value={mapping.descCol} onChange={(v) => update({ descCol: v })} />
+
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-semibold uppercase tracking-widest text-[#666666]">Amount type</label>
+          <div className="flex gap-3 pt-1">
+            {(['single', 'split'] as const).map((mode) => (
+              <label key={mode} className="flex cursor-pointer items-center gap-2 text-sm text-[#cccccc]">
+                <input
+                  type="radio"
+                  checked={mapping.amountMode === mode}
+                  onChange={() => update({ amountMode: mode })}
+                  className="accent-white"
+                />
+                {mode === 'single' ? 'Single' : 'Debit / Credit'}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {mapping.amountMode === 'single' ? (
+          <ColSelect label="Amount" headers={headers} value={mapping.amountCol} onChange={(v) => update({ amountCol: v })} />
+        ) : (
+          <>
+            <ColSelect label="Debit (money out)" headers={headers} value={mapping.debitCol} onChange={(v) => update({ debitCol: v })} />
+            <ColSelect label="Credit (money in)" headers={headers} value={mapping.creditCol} onChange={(v) => update({ creditCol: v })} />
+          </>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-[#cccccc]">
+          <input
+            type="checkbox"
+            checked={mapping.hasHeader}
+            onChange={(e) => update({ hasHeader: e.target.checked })}
+            className="accent-white"
+          />
+          First row is a header
+        </label>
+      </div>
+
+      {preview.length > 0 && (
+        <div className="overflow-auto rounded-lg border border-[#1f1f1f]">
+          <table className="min-w-full text-xs">
+            <thead>
+              <tr className="border-b border-[#1f1f1f]">
+                {headers.map((h, i) => (
+                  <th key={i} className="px-3 py-2 text-left font-semibold text-[#666666]">{h || `col ${i}`}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#1f1f1f]">
+              {preview.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => (
+                    <td key={ci} className="px-3 py-2 text-[#888888]">{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={onParse}
+        disabled={loading}
+        className="rounded-full bg-white px-5 py-2 text-sm font-medium text-[#111111] hover:bg-[#e5e5e5] disabled:opacity-50"
+      >
+        {loading ? 'Parsing…' : 'Parse CSV'}
+      </button>
+    </section>
   )
 }
 

@@ -1,5 +1,5 @@
 import Papa from 'papaparse'
-import type { BankId, ParsedImportRow } from './types'
+import type { BankId, ColMapping, ParsedImportRow } from './types'
 import { classifyByKeyword, duplicateKey, normalizeDate, parseNumber, PAYMENT_SKIP_PATTERN } from './utils'
 
 function normalizeDescription(raw: string | number | null | undefined): string {
@@ -175,6 +175,82 @@ export function parseBmoCsv(csvText: string): ParsedImportRow[] {
       keywordType === 'refund' ? 'refund' : amount < 0 ? 'refund' : 'charge'
 
     parsed.push(buildRow(date, description, Math.abs(amount), 1, type))
+  }
+
+  return parsed
+}
+
+export function sniffCsvHeaders(csvText: string): { headers: string[]; preview: string[][] } {
+  const rows = parseRows(csvText)
+  if (rows.length === 0) return { headers: [], preview: [] }
+  return { headers: rows[0], preview: rows.slice(1, 5) }
+}
+
+export function autoDetectColMapping(headers: string[]): ColMapping {
+  const h = headers.map((x) => x.toLowerCase().trim())
+
+  const find = (...names: string[]) => {
+    for (const name of names) {
+      const idx = h.findIndex((x) => x.includes(name))
+      if (idx >= 0) return idx
+    }
+    return -1
+  }
+
+  const dateCol = find('date', 'trans', 'posted', 'posting')
+  const descCol = find('description', 'memo', 'payee', 'narrative', 'detail')
+  const debitCol = find('debit', 'withdrawal', 'money out', 'dr')
+  const creditCol = find('credit', 'deposit', 'money in', 'cr')
+  const amountCol = find('amount', 'transaction amount', 'value')
+
+  const hasSplit = debitCol >= 0 || creditCol >= 0
+
+  return {
+    dateCol: dateCol >= 0 ? dateCol : 0,
+    descCol: descCol >= 0 ? descCol : 1,
+    amountMode: hasSplit ? 'split' : 'single',
+    amountCol: amountCol >= 0 ? amountCol : (hasSplit ? -1 : 2),
+    debitCol: debitCol >= 0 ? debitCol : -1,
+    creditCol: creditCol >= 0 ? creditCol : -1,
+    hasHeader: true,
+  }
+}
+
+export function parseGenericCsv(csvText: string, mapping: ColMapping, bankId: BankId): ParsedImportRow[] {
+  const rows = parseRows(csvText)
+  const dataRows = mapping.hasHeader ? rows.slice(1) : rows
+  const parsed: ParsedImportRow[] = []
+
+  for (const row of dataRows) {
+    const date = normalizeDate(row[mapping.dateCol] ?? '')
+    const description = normalizeDescription(row[mapping.descCol])
+    if (!date || !description) continue
+    if (PAYMENT_SKIP_PATTERN.test(description)) continue
+
+    let amount = Number.NaN
+    let type: 'charge' | 'refund' = 'charge'
+
+    if (mapping.amountMode === 'single') {
+      const raw = parseNumber(row[mapping.amountCol] ?? '')
+      if (!Number.isFinite(raw) || raw === 0) continue
+      amount = Math.abs(raw)
+      type = raw < 0 ? 'refund' : classifyByKeyword(description)
+    } else {
+      const debit = mapping.debitCol >= 0 ? parseNumber(row[mapping.debitCol] ?? '') : Number.NaN
+      const credit = mapping.creditCol >= 0 ? parseNumber(row[mapping.creditCol] ?? '') : Number.NaN
+      const debitValid = Number.isFinite(debit) && debit > 0
+      const creditValid = Number.isFinite(credit) && credit > 0
+      if (!debitValid && !creditValid) continue
+      if (creditValid) {
+        amount = credit
+        type = 'refund'
+      } else {
+        amount = debit
+        type = classifyByKeyword(description) === 'refund' ? 'refund' : 'charge'
+      }
+    }
+
+    parsed.push(buildRow(date, description, amount, bankId, type))
   }
 
   return parsed

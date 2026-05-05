@@ -1,5 +1,15 @@
 export type TxType = 'charge' | 'refund'
-export type BankId = 0 | 1 | 2
+export type BankId = number
+
+export interface ColMapping {
+  dateCol: number
+  descCol: number
+  amountMode: 'single' | 'split'
+  amountCol: number
+  debitCol: number
+  creditCol: number
+  hasHeader: boolean
+}
 
 export interface Transaction {
   id: string

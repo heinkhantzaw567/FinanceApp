@@ -11,8 +11,7 @@ let db;
 let mainWindow = null;
 let tray = null;
 let isQuitting = false;
-// Teal 16×16 circle, generated offline and embedded to avoid file-path issues in dev vs packaged
-const TRAY_ICON_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAALklEQVR42mNgoBD4nT2ChkhQik8bftVY9JCmgRjVKHpGpAbaxwM5SYOcxEckAACz0zLsABMuwgAAAABJRU5ErkJggg==';
+const APP_ICON_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAFXElEQVR42u3dXU4qSwBGUSbgCJyBg3HUvjomDQ8khkig6R+6ei+S9UpSJd/G67nK6XSwx9v7xw+s5eRh2CAUBg+CYPQgBkYPYmD4IASGD0Jg+CAExg/FCPgiQjQEvnAQjYAvGAQj4IsE0RD4wkA0Ar4gEI2ALwREI+ALANEIuHiIRsCFQzQCLhrCEXDJEA2AC4ZoBFwsRCPgQiEcAZcJ0QC4SIhGwAVCOAIuD6IBcHEQjoBLg2gAXBiEI+CyIBoAFwXhCLgkEACgFgAXBOEIuBwQAKAWABcD4Qi4FBAAQACATABcCIQj4DJAAAABAAQAEABAAAABAAQAEABg8AC4CAhHwCWAAAACAAgAIACAAAACAAgAIACAAAACAAgAIACAAAACAAgAIACAAAACAK9xfrgHASA2+lsPAYDo+MsREAAO/637lIcAwCDv4EuPvxgBAWDob90FQACI/je7AAgA0eH/fXx+f/1rzuPWc14TANjh+OdE4NHxCwC8cPwCIABEh//oUAVAADjY8KeOdK3nFQDY8fCnRuCZ5xUA2Gj85+d4NgD3IvDscwoAbDD8izkBuI7BEs8jALDR+JcMwFIEADYYvgAIAIHx33tuARAAYu/6AiAAxIcvAAJAfPwCIABEhy8AAkDgh3wCIAB41xcAAcDwBUAAMH4BEADawxcAASDwQz4BEAC86wuAAGD4AiAAGL8ACADt4QuAABD4IZ8ACADe9QVAADB8ARAAjF8ABID28AVAAAj8kE8ABADv+gIgABi+AAgAxi8AAsCywx81BAIgAMa/0kMABIDg8P0rgAAQH/4oERAAATD8CUMWAAEQgOA7/pznEgABYOBv9S8vziWeY28DEAABMPoJo11z/AIgAOx0+AIgAAIQHr4ACIAAHPif8qa8SNd6XgEQAHY8/KkRGGEAAiAA6f9Xf86LdY2wCIAAsOEv6Sz1wp0zegEQAF70m3n1AQiAAKR/JVcABEAAwr+LLwACIADhP8IhAAIgAOG/viMAAiAA4T+7JQACIADhv7cnAAIgAAMM3wCcXwC82xuA8wuA4RuA8wuA4RuA8wuA4RuA8wuA4RuA8wuA4RuA8wuA4RuA8wuA4RuA0RuA8wuA4RuA8wvAVsMXAAEQgPDwfTquAAiA8fsZgAAIQH38AiAAAiAAAiAAAjDy+H06rgAIQPA7AJ+NJwACEAyAD8cUAAEI/iuAT8cVAAEI/Y9APh1XAAQgHACfjisAAiAAPh1XAARAAHw6rgAIgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgAAYgPMLgBeA8zu/AHgBOL/zC4AXgPM7vwB4ATi/8wuAF4DzO78AeAE4v/MLgBeA8zu/AHgBOL/zC4AXgPM7vwB4ATi/8wuAF4DzO78AeAE4v/MLACAAgAAAAgAIACAAgAAAAgAIACAAgAAAAgAIACAAgAAAAgAC4CJAAIBcAM4PFwHR8QsACIALAQEABAAQAEAAAAEABAAQAOAgARABCI9fAEAAXAwIAJALgAhAePwCAALggqAaABGA8PgFAATARUE1ICIA4fELAMQDIAIQHr8AQDwAIgDh8QsAxAMgAhAevwhAfPwCAPEAiACExy8CEB+/CEB8/AIA8QCIAITHLwIQH78IQHz8IgDx8YsAxMcvAhAfvwhAfPxCAPHhiwAYvwhAffxCAPHhiwAYvxBAffhCAIYvBGD4YoDRe4gBRu8hCBi8h1Bg2Bs/fgF9QmaUOb+hoAAAAABJRU5ErkJggg==';
 function normalizeAmount(value) {
     return Math.round(Math.abs(value) * 100) / 100;
 }
@@ -60,7 +59,7 @@ function ensureDb() {
       description TEXT NOT NULL,
       amount REAL NOT NULL,
       type TEXT NOT NULL CHECK(type IN ('charge', 'refund')),
-      bank_id INTEGER NOT NULL CHECK(bank_id IN (0, 1, 2)),
+      bank_id INTEGER NOT NULL,
       category TEXT NOT NULL,
       source TEXT NOT NULL,
       created_at TEXT NOT NULL
@@ -103,7 +102,32 @@ function ensureDb() {
         description TEXT NOT NULL,
         amount REAL NOT NULL,
         type TEXT NOT NULL CHECK(type IN ('charge', 'refund')),
-        bank_id INTEGER NOT NULL CHECK(bank_id IN (0, 1, 2)),
+        bank_id INTEGER NOT NULL,
+        category TEXT NOT NULL,
+        source TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO transactions SELECT * FROM transactions_old;
+      DROP TABLE transactions_old;
+      CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
+      CREATE INDEX IF NOT EXISTS idx_transactions_bank ON transactions(bank_id);
+      CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
+      CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category);
+    `);
+    }
+    // 3. Drop bank_id CHECK constraint to allow any bank id (supports user-added banks).
+    //    Re-read txCreate since migration 2 may have just rewritten it.
+    const txCreate2 = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'`).get()?.sql ?? '';
+    if (txCreate2.includes('CHECK(bank_id IN')) {
+        db.exec(`
+      ALTER TABLE transactions RENAME TO transactions_old;
+      CREATE TABLE transactions (
+        id TEXT PRIMARY KEY,
+        date TEXT NOT NULL,
+        description TEXT NOT NULL,
+        amount REAL NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('charge', 'refund')),
+        bank_id INTEGER NOT NULL,
         category TEXT NOT NULL,
         source TEXT NOT NULL,
         created_at TEXT NOT NULL
@@ -120,7 +144,8 @@ function ensureDb() {
     db.prepare(`INSERT OR IGNORE INTO banks (id, name, account_type, opening_balance, credit_limit) VALUES
       (0, 'TD Credit Card', 'credit', 0, 0),
       (1, 'BMO Credit Card', 'credit', 0, 0),
-      (2, 'TD Chequing', 'chequing', 0, 0)`).run();
+      (2, 'TD Chequing', 'chequing', 0, 0),
+      (3, 'Other', 'credit', 0, 0)`).run();
 }
 function checkAndNotify() {
     if (!mainWindow)
@@ -160,7 +185,7 @@ function checkAndNotify() {
     notification.show();
 }
 function setupTray() {
-    const icon = electron_1.nativeImage.createFromDataURL(TRAY_ICON_DATA_URL);
+    const icon = electron_1.nativeImage.createFromDataURL(APP_ICON_DATA_URL).resize({ width: 16, height: 16 });
     tray = new electron_1.Tray(icon);
     tray.setToolTip('Cashflow Tracker');
     const menu = electron_1.Menu.buildFromTemplate([
@@ -180,6 +205,10 @@ function setupTray() {
         },
     ]);
     tray.setContextMenu(menu);
+    tray.on('click', () => {
+        mainWindow?.show();
+        mainWindow?.focus();
+    });
     tray.on('double-click', () => {
         mainWindow?.show();
         mainWindow?.focus();
@@ -193,6 +222,7 @@ function createWindow() {
         minWidth: 1200,
         minHeight: 800,
         backgroundColor: '#08101a',
+        icon: electron_1.nativeImage.createFromDataURL(APP_ICON_DATA_URL),
         webPreferences: {
             preload: path_1.default.join(__dirname, 'preload.js'),
             contextIsolation: true,
