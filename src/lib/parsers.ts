@@ -1,6 +1,6 @@
 import Papa from 'papaparse'
 import type { BankId, ColMapping, ParsedImportRow } from './types'
-import { classifyByKeyword, duplicateKey, normalizeDate, parseNumber, PAYMENT_SKIP_PATTERN } from './utils'
+import { categorizeExpense, classifyByKeyword, duplicateKey, normalizeDate, parseNumber, PAYMENT_SKIP_PATTERN } from './utils'
 
 function normalizeDescription(raw: string | number | null | undefined): string {
   return String(raw ?? '').trim().replace(/\s+/g, ' ')
@@ -21,7 +21,7 @@ function buildRow(
     amount: normalizedAmount,
     type,
     bankId,
-    category: 'Other',
+    category: type === 'charge' ? categorizeExpense(description) : 'Other',
     key: duplicateKey({ date, description, amount: normalizedAmount, bankId }),
   }
 }
@@ -45,6 +45,11 @@ export function detectCsvBank(csvText: string): BankId | null {
   // TD Chequing: quoted YYYY-MM-DD date at start of first data line
   if (/^"?\d{4}-\d{2}-\d{2}"?/.test(firstLine.trim())) {
     return 2
+  }
+
+  // BMO Chequing: "Transaction Type" column with CREDIT/DEBIT values (may appear after a preamble line)
+  if (allText.includes('TRANSACTION TYPE')) {
+    return 4
   }
 
   // BMO: has "Item #" column (may appear after a preamble line)
@@ -97,12 +102,10 @@ export function parseTdCsv(csvText: string): ParsedImportRow[] {
 
     const amount = creditValid ? credit : debit
 
-    // Skip credit-card-payment rows (e.g. "PAYMENT - THANK YOU")
-    if (PAYMENT_SKIP_PATTERN.test(description)) {
-      continue
-    }
-
-    const type = classifyByKeyword(description)
+    // Payment rows (e.g. "PAYMENT - THANK YOU") are imported, not skipped — the credit
+    // column already marks them as refunds, which correctly offsets the chequing-side
+    // charge that funded the payment.
+    const type: 'charge' | 'refund' = creditValid ? 'refund' : classifyByKeyword(description)
     parsed.push(buildRow(date, description, amount, 0, type))
   }
 
@@ -159,15 +162,9 @@ export function parseBmoCsv(csvText: string): ParsedImportRow[] {
       continue
     }
 
-    // Skip credit-card-payment rows
-    if (PAYMENT_SKIP_PATTERN.test(description)) {
-      continue
-    }
-
-    // Skip BMO transfer payments: "TRSF FROM/DE ACCT/CPT ..."
-    if (/^TRSF (FROM|DE)\b/i.test(description)) {
-      continue
-    }
+    // Payment rows (e.g. "PAYMENT - THANK YOU", "TRSF FROM/DE ACCT/CPT ...") are imported,
+    // not skipped — they post as negative amounts and become refunds below, which correctly
+    // offsets the chequing-side charge that funded the payment.
 
     // In BMO exports: positive = charge (you spent), negative = credit/refund
     const keywordType = classifyByKeyword(description)
@@ -175,6 +172,66 @@ export function parseBmoCsv(csvText: string): ParsedImportRow[] {
       keywordType === 'refund' ? 'refund' : amount < 0 ? 'refund' : 'charge'
 
     parsed.push(buildRow(date, description, Math.abs(amount), 1, type))
+  }
+
+  return parsed
+}
+
+export function parseBmoChequingCsv(csvText: string): ParsedImportRow[] {
+  const rows = parseRows(csvText)
+  const parsed: ParsedImportRow[] = []
+
+  for (const row of rows) {
+    // Columns: Card #, Transaction Type (CREDIT/DEBIT), Date Posted (YYYYMMDD), Amount (signed), Description
+    if (row.length < 5) {
+      continue
+    }
+
+    const rowText = row.join(' ').toUpperCase()
+    if (rowText.includes('TRANSACTION TYPE') || rowText.includes('TRANSACTION AMOUNT')) {
+      continue
+    }
+
+    const txType = row[1]?.trim().toUpperCase()
+    const date = normalizeDate(row[2] ?? '')
+    const rawAmount = parseNumber(row[3])
+    const description = normalizeDescription(row[4])
+
+    if (!date || !description || !Number.isFinite(rawAmount) || rawAmount === 0) {
+      continue
+    }
+
+    const amount = Math.round(Math.abs(rawAmount) * 100) / 100
+    const upper = description.toUpperCase()
+
+    if (txType === 'CREDIT') {
+      let category = 'Income'
+      if (upper.includes('PAY') && !upper.includes('PAYPAL')) {
+        category = 'Paycheck'
+      } else if (upper.includes('ETRNSFR') || upper.includes('E-TRANSFER') || upper.includes('E-TFR')) {
+        category = 'E-Transfer'
+      }
+      parsed.push({
+        date,
+        description,
+        amount,
+        type: 'refund',
+        bankId: 4,
+        category,
+        key: duplicateKey({ date, description, amount, bankId: 4 }),
+      })
+    } else if (txType === 'DEBIT') {
+      const category = categorizeExpense(description)
+      parsed.push({
+        date,
+        description,
+        amount,
+        type: 'charge',
+        bankId: 4,
+        category,
+        key: duplicateKey({ date, description, amount, bankId: 4 }),
+      })
+    }
   }
 
   return parsed
@@ -296,28 +353,7 @@ export function parseTdChequingCsv(csvText: string): ParsedImportRow[] {
         key: duplicateKey({ date, description, amount, bankId: 2 }),
       })
     } else if (withdrawalValid) {
-      let category = 'Other'
-      if (upper.includes('RENT') || upper.includes('LEASE')) {
-        category = 'Rent'
-      } else if (upper.includes('E-TRANSFER') || upper.includes('E-TFR')) {
-        category = 'E-Transfer'
-      } else if (
-        upper.includes('TD VISA') ||
-        upper.includes('BMO') ||
-        upper.includes('CREDIT CARD') ||
-        upper.includes('CREDITCARD')
-      ) {
-        category = 'Credit Card Payment'
-      } else if (
-        upper.includes('GROCERY') ||
-        upper.includes('GROCERIES') ||
-        upper.includes('METRO') ||
-        upper.includes('LOBLAWS') ||
-        upper.includes('SOBEYS') ||
-        upper.includes('FOOD BASICS')
-      ) {
-        category = 'Groceries'
-      }
+      const category = categorizeExpense(description)
       const amount = Math.round(withdrawal * 100) / 100
       parsed.push({
         date,

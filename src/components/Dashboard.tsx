@@ -2,12 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { getDashboard, getRecentTransactions } from '../lib/db'
 import type { DashboardData, Transaction } from '../lib/types'
-import { buildMonthOptions, formatCurrency, formatMonthLabel } from '../lib/utils'
+import { BANK_OPTIONS, buildMonthOptions, formatCurrency, formatMonthLabel } from '../lib/utils'
 
 interface DashboardProps {
   month: string
   onMonthChange: (month: string) => void
   refreshToken: number
+}
+
+function bankLabel(bankId: number): string {
+  return BANK_OPTIONS.find((b) => b.id === bankId)?.label ?? 'Unknown'
 }
 
 export default function Dashboard({ month, onMonthChange, refreshToken }: DashboardProps) {
@@ -150,7 +154,7 @@ export default function Dashboard({ month, onMonthChange, refreshToken }: Dashbo
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-white">{row.description}</p>
                 <p className="mt-0.5 text-xs text-[#666666]">
-                  {row.date} · {row.bank_id === 0 ? 'TD Credit' : row.bank_id === 1 ? 'BMO Credit' : 'Chequing'} · {row.category}
+                  {row.date} · {bankLabel(row.bank_id)} · {row.category}
                 </p>
               </div>
               <span

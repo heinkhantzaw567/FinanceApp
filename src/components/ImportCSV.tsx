@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import { getExistingKeys, importTransactions } from '../lib/db'
-import { autoDetectColMapping, detectCsvBank, parseBmoCsv, parseGenericCsv, parseTdChequingCsv, parseTdCsv, sniffCsvHeaders } from '../lib/parsers'
+import { autoDetectColMapping, detectCsvBank, parseBmoChequingCsv, parseBmoCsv, parseGenericCsv, parseTdChequingCsv, parseTdCsv, sniffCsvHeaders } from '../lib/parsers'
 import type { BankId, ColMapping, ParsedImportRow, TransactionInput } from '../lib/types'
 import { formatCurrency, prepareDuplicateCandidates, txTypeLabel } from '../lib/utils'
 
@@ -47,6 +47,7 @@ export default function ImportCSV({ onImported }: ImportCSVProps) {
       const parsed =
         detected === 0 ? parseTdCsv(text)
         : detected === 2 ? parseTdChequingCsv(text)
+        : detected === 4 ? parseBmoChequingCsv(text)
         : parseBmoCsv(text)
       if (parsed.length === 0) {
         setError('No valid rows were found in this file.')
@@ -166,7 +167,7 @@ export default function ImportCSV({ onImported }: ImportCSVProps) {
     <div className="max-w-4xl space-y-6">
       <p className="text-xs font-semibold uppercase tracking-widest text-[#666666]">Import CSV</p>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
         <DropZone
           label="TD Credit Card"
           subtext="Date, Description, Debit, Credit"
@@ -184,6 +185,12 @@ export default function ImportCSV({ onImported }: ImportCSVProps) {
           subtext="Date, Description, Debit, Credit, Balance"
           onDrop={(event) => onDrop(event, 2)}
           onFileChange={(event) => handleInputChange(event, 2)}
+        />
+        <DropZone
+          label="BMO Chequing"
+          subtext="Card#, Type, Date Posted, Amount, Description"
+          onDrop={(event) => onDrop(event, 4)}
+          onFileChange={(event) => handleInputChange(event, 4)}
         />
         <DropZone
           label="Other Bank"

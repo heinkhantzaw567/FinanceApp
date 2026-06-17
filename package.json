@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "dist": "npm run build && electron-builder",
-    "rebuild": "electron-builder install-app-deps"
+    "rebuild": "node node_modules/prebuild-install/bin.js --runtime electron --target 41.5.0 --arch x64"
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
@@ -47,6 +47,7 @@
   "build": {
     "appId": "ca.finance.cashflowtracker",
     "productName": "Cashflow Tracker",
+    "npmRebuild": false,
     "files": [
       "dist/**",
       "dist-electron/**",

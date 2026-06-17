@@ -4,6 +4,7 @@ export const BANK_OPTIONS: Array<{ id: BankId; label: string }> = [
   { id: 0, label: 'TD Credit Card' },
   { id: 1, label: 'BMO Credit Card' },
   { id: 2, label: 'TD Chequing' },
+  { id: 4, label: 'BMO Chequing' },
   { id: 3, label: 'Other' },
 ]
 
@@ -103,6 +104,47 @@ export function formatCurrency(value: number): string {
 export function classifyByKeyword(description: string): TxType {
   const upper = description.toUpperCase()
   return KEYWORDS.some((keyword) => upper.includes(keyword)) ? 'refund' : 'charge'
+}
+
+export function categorizeExpense(description: string): string {
+  const upper = description.toUpperCase()
+  if (upper.includes('RENT') || upper.includes('LEASE')) {
+    return 'Rent'
+  }
+  if (upper.includes('E-TRANSFER') || upper.includes('E-TFR')) {
+    return 'E-Transfer'
+  }
+  if (
+    upper.includes('TD VISA') ||
+    upper.includes('BMO') ||
+    upper.includes('CREDIT CARD') ||
+    upper.includes('CREDITCARD') ||
+    // recurring BMO chequing transfer reference used to pay off the BMO credit card
+    upper.includes('TF 0005191237197655547')
+  ) {
+    return 'Credit Card Payment'
+  }
+  if (
+    upper.includes('GROCERY') ||
+    upper.includes('GROCERIES') ||
+    upper.includes('METRO') ||
+    upper.includes('LOBLAWS') ||
+    upper.includes('SOBEYS') ||
+    upper.includes('FOOD BASICS')
+  ) {
+    return 'Groceries'
+  }
+  if (
+    upper.includes('PRESTO') ||
+    upper.includes('TTC') ||
+    upper.includes('GO TRANSIT') ||
+    upper.includes('UBER') ||
+    upper.includes('LYFT') ||
+    upper.includes('TAXI')
+  ) {
+    return 'Transport & Transit'
+  }
+  return 'Other'
 }
 
 export function duplicateKey(row: {

@@ -193,7 +193,8 @@ function ensureDb(): void {
       (0, 'TD Credit Card', 'credit', 0, 0),
       (1, 'BMO Credit Card', 'credit', 0, 0),
       (2, 'TD Chequing', 'chequing', 0, 0),
-      (3, 'Other', 'credit', 0, 0)`
+      (3, 'Other', 'credit', 0, 0),
+      (4, 'BMO Chequing', 'chequing', 0, 0)`
   ).run()
 }
 
