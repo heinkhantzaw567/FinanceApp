@@ -116,6 +116,7 @@ export default function Transactions({ refreshToken, onChanged }: TransactionsPr
           <option value="all">All Types</option>
           <option value="charge">Charge</option>
           <option value="refund">Refund</option>
+          <option value="transfer">Transfer</option>
         </select>
 
         <select
@@ -157,12 +158,12 @@ export default function Transactions({ refreshToken, onChanged }: TransactionsPr
                   <td className="py-3 pr-3 text-[#888888]">{row.date}</td>
                   <td className="py-3 pr-3 text-white">{row.description}</td>
                   <td className="py-3 pr-3 text-[#888888]">{bankLabel(row.bank_id)}</td>
-                  <td className={`py-3 pr-3 font-medium ${row.type === 'charge' ? 'text-[#ef4444]' : 'text-[#22c55e]'}`}>
+                  <td className={`py-3 pr-3 font-medium ${row.type === 'charge' ? 'text-[#ef4444]' : row.type === 'refund' ? 'text-[#22c55e]' : 'text-[#888888]'}`}>
                     {txTypeLabel(row.type)}
                   </td>
                   <td className="py-3 pr-3 text-[#888888]">{row.category}</td>
-                  <td className={`py-3 pr-3 text-right font-semibold ${row.type === 'charge' ? 'text-[#ef4444]' : 'text-[#22c55e]'}`}>
-                    {row.type === 'charge' ? '-' : '+'}{formatCurrency(row.amount)}
+                  <td className={`py-3 pr-3 text-right font-semibold ${row.type === 'charge' ? 'text-[#ef4444]' : row.type === 'refund' ? 'text-[#22c55e]' : 'text-[#888888]'}`}>
+                    {row.type === 'charge' ? '-' : row.type === 'refund' ? '+' : ''}{formatCurrency(row.amount)}
                   </td>
                   <td className="py-3 text-right">
                     <button

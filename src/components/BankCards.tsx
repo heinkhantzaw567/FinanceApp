@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { clearAllData, getBanks, updateBank } from '../lib/db'
+import { clearAllData, getBanks, recategorizeAll, updateBank } from '../lib/db'
 import type { BankStats } from '../lib/types'
 import { formatCurrency } from '../lib/utils'
 
@@ -31,12 +31,16 @@ export default function BankCards({ refreshToken, onChanged }: BankCardsProps) {
   }
 
   async function clearAll() {
-    if (!window.confirm('Delete ALL transactions? This cannot be undone.')) {
-      return
-    }
+    if (!window.confirm('Delete ALL transactions? This cannot be undone.')) return
     await clearAllData()
     await load()
     onChanged()
+  }
+
+  async function recategorize() {
+    const result = await recategorizeAll()
+    onChanged()
+    window.alert(`Re-categorized ${result.updated} transactions.`)
   }
 
   return (
@@ -44,6 +48,13 @@ export default function BankCards({ refreshToken, onChanged }: BankCardsProps) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs font-semibold uppercase tracking-widest text-[#666666]">Banks</p>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={recategorize}
+            className="rounded-full border border-[#333333] px-4 py-2 text-sm font-medium text-[#cccccc] hover:border-[#555555] hover:text-white"
+          >
+            Re-categorize all
+          </button>
           <button
             type="button"
             onClick={clearAll}

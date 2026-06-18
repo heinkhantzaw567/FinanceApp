@@ -58,7 +58,7 @@ export default function ImportCSV({ onImported }: ImportCSVProps) {
       const existingKeys = new Set(await getExistingKeys(prepareDuplicateCandidates(parsed)))
       const withStatus = parsed.map((row) => ({
         ...row,
-        status: existingKeys.has(row.key) ? 'duplicate' : 'new',
+        status: (existingKeys.has(row.key) ? 'duplicate' : 'new') as 'new' | 'duplicate',
       }))
 
       setRows(withStatus)
@@ -105,7 +105,7 @@ export default function ImportCSV({ onImported }: ImportCSVProps) {
       const existingKeys = new Set(await getExistingKeys(prepareDuplicateCandidates(parsed)))
       const withStatus = parsed.map((row) => ({
         ...row,
-        status: existingKeys.has(row.key) ? 'duplicate' : 'new',
+        status: (existingKeys.has(row.key) ? 'duplicate' : 'new') as 'new' | 'duplicate',
       })) as ParsedImportRow[]
       setRows(withStatus)
       setSummary(`${withStatus.length} rows parsed.`)

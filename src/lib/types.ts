@@ -1,4 +1,5 @@
-export type TxType = 'charge' | 'refund'
+export type TxType = 'charge' | 'refund' | 'transfer'
+export type TransferDirection = 'in' | 'out'
 export type BankId = number
 
 export interface ColMapping {
@@ -17,6 +18,8 @@ export interface Transaction {
   description: string
   amount: number
   type: TxType
+  transfer_direction: TransferDirection | null
+  account_type: 'credit' | 'chequing'
   bank_id: BankId
   category: string
   source: 'import' | 'manual' | 'seed'
@@ -79,6 +82,8 @@ export interface ParsedImportRow {
   description: string
   amount: number
   type: TxType
+  transfer_direction: TransferDirection | null
+  account_type: 'credit' | 'chequing'
   bankId: BankId
   category: string
   key: string
@@ -104,6 +109,7 @@ declare global {
       getExistingKeys: (candidates: DuplicateCandidate[]) => Promise<string[]>
       importTransactions: (rows: TransactionInput[]) => Promise<{ imported: number; duplicates: number }>
       clearAllData: () => Promise<boolean>
+      recategorizeAll: () => Promise<{ updated: number }>
       onOpenImport: (cb: () => void) => void
     }
   }

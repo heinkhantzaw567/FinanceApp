@@ -64,3 +64,7 @@ export async function importTransactions(rows: TransactionInput[]): Promise<{ im
 export async function clearAllData(): Promise<boolean> {
   return window.cashflow.clearAllData()
 }
+
+export async function recategorizeAll(): Promise<{ updated: number }> {
+  return window.cashflow.recategorizeAll()
+}

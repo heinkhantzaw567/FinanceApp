@@ -13,6 +13,7 @@ const api = {
     getExistingKeys: (candidates) => electron_1.ipcRenderer.invoke('cashflow:get-existing-keys', candidates),
     importTransactions: (rows) => electron_1.ipcRenderer.invoke('cashflow:import-transactions', rows),
     clearAllData: () => electron_1.ipcRenderer.invoke('cashflow:clear-all'),
+    recategorizeAll: () => electron_1.ipcRenderer.invoke('cashflow:recategorize-all'),
     onOpenImport: (cb) => electron_1.ipcRenderer.on('open-import', () => cb()),
 };
 electron_1.contextBridge.exposeInMainWorld('cashflow', api);

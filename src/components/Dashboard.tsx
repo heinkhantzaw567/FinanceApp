@@ -131,7 +131,7 @@ export default function Dashboard({ month, onMonthChange, refreshToken }: Dashbo
               />
               <YAxis stroke="#333" tick={{ fill: '#888', fontSize: 11 }} />
               <Tooltip
-                formatter={(value: number) => formatCurrency(value)}
+                formatter={(value) => formatCurrency(Number(value))}
                 contentStyle={{ background: '#1a1a1a', border: '1px solid #333', borderRadius: 8, color: '#fff' }}
                 labelStyle={{ color: '#888' }}
               />
@@ -159,10 +159,10 @@ export default function Dashboard({ month, onMonthChange, refreshToken }: Dashbo
               </div>
               <span
                 className={`ml-4 shrink-0 text-sm font-semibold ${
-                  row.type === 'charge' ? 'text-[#ef4444]' : 'text-[#22c55e]'
+                  row.type === 'charge' ? 'text-[#ef4444]' : row.type === 'refund' ? 'text-[#22c55e]' : 'text-[#888888]'
                 }`}
               >
-                {row.type === 'charge' ? '-' : '+'}
+                {row.type === 'charge' ? '-' : row.type === 'refund' ? '+' : ''}
                 {formatCurrency(row.amount)}
               </span>
             </div>

@@ -68,7 +68,7 @@ export default function SpendingBreakdown({ refreshToken }: SpendingBreakdownPro
                   ))}
                 </Pie>
                 <Tooltip
-                  formatter={(value: number) => formatCurrency(value)}
+                  formatter={(value) => formatCurrency(Number(value))}
                   contentStyle={{ background: '#1a1a1a', border: '1px solid #333', borderRadius: 8, color: '#fff' }}
                 />
               </PieChart>
